@@ -151,35 +151,38 @@ def main():
             if do_step:
                 video_chunk = to_video_chunk(buf_model_rgb, device)
 
-                # If user requested reseed, we set is_first=True and prepare query_points if manual
-                query_points_tensor = None
+                # If user requested reseed, set up manual queries for the online API
+                queries_tensor = None
                 if need_reseed:
                     is_first = True
                     if seed_mode == "manual":
-                        # Map clicked CAM points -> resized coords expected by model
                         if len(clicks.points_cam) == 0:
                             print("[warn] no clicked points; falling back to grid seeding.")
                         else:
+                            # map CAMERA clicks -> RESIZED coords for the model
                             pts = []
                             for (xc, yc) in clicks.points_cam:
                                 xr = xc / scale_x
                                 yr = yc / scale_y
-                                pts.append([xr, yr])  # (x,y) in resized pixel coords
-                            pts = np.array(pts, dtype=np.float32)  # (N,2)
-                            # CoTracker online expects query_points as (B, 1, N, 2) in pixel coords
-                            query_points_tensor = torch.from_numpy(pts).to(device=device, dtype=torch.float32)
-                            query_points_tensor = query_points_tensor.unsqueeze(0).unsqueeze(0)  # (1,1,N,2)
+                                pts.append([0.0, xr, yr])   # (t=0, x, y)
+                            pts = np.array(pts, dtype=np.float32)           # (N,3)
+                            queries_tensor = torch.from_numpy(pts).to(device=device, dtype=torch.float32)
+                            queries_tensor = queries_tensor.unsqueeze(0)     # (1, N, 3)
                     need_reseed = False
+
+
+
+                    
 
                 # Call model with robust unpacking
                 with torch.inference_mode():
                     if is_first:
-                        if seed_mode == "manual" and query_points_tensor is not None:
+                        if seed_mode == "manual" and queries_tensor is not None:
                             out = model(
-                                video_chunk,
+                                video_chunk=video_chunk,
                                 is_first_step=True,
-                                query_points=query_points_tensor,
-                                grid_size=None,
+                                queries=queries_tensor,             # (1, N, 3) with (t, x, y)
+                                grid_size=0,                        # no grid when manual
                                 grid_query_frame=0,
                             )
                         else:
@@ -191,7 +194,10 @@ def main():
                             )
                         is_first = False
                     else:
-                        out = model(video_chunk)
+                        if seed_mode == "manual" and queries_tensor is not None:
+                            out = model(video_chunk=video_chunk, queries=queries_tensor)
+                        else:
+                            out = model(video_chunk=video_chunk)
 
                 pred_tracks = pred_vis = None
                 if out is None:
