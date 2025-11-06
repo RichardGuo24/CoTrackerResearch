@@ -1,0 +1,5 @@
+torch              # your CUDA/MPS build (install per your GPU)
+torchvision
+opencv-python
+imageio            # only needed for parity with demo; harmless to keep
+numpy
